@@ -1,0 +1,17 @@
+# Frontend Configuration
+
+BACKEND_URL: "http://localhost:8000"
+
+# Streamlit settings
+page_title: "PDF AI Chatbot"
+page_icon: "🤖"
+layout: "wide"
+initial_sidebar_state: "expanded"
+
+# File upload settings
+max_file_size_mb: 50
+allowed_file_types: [".pdf"]
+
+# Chat settings
+chunk_size: 1000
+similarity_threshold: 0.5

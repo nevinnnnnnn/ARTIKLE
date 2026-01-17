@@ -6,7 +6,7 @@ from typing import List, Tuple, Optional, Dict, Any
 from datetime import datetime
 from sklearn.metrics.pairwise import cosine_similarity
 from app.config import settings
-from app.services.embeddings import embedding_service
+from app.services import embedding_service
 
 logger = logging.getLogger(__name__)
 

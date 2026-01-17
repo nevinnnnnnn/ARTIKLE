@@ -19,7 +19,7 @@ from app.auth.dependencies import require_admin, require_user
 from app.services.pdf_processor import pdf_processor
 from app.utils import create_response, get_logger
 from app.utils.vector_store import vector_store_manager
-from app.services.embeddings import embedding_service
+from app.services.embeddings_backup import embedding_service
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 logger = get_logger(__name__)

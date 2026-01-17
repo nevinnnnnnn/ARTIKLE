@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 class ChatService:
     def __init__(self):
-        self.relevance_threshold = 0.3  # Minimum similarity score for relevance
+        self.relevance_threshold = 0.1  # Minimum similarity score for relevance
         
     def retrieve_context(self, document_id: int, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """Retrieve relevant context from document"""
@@ -75,33 +75,46 @@ ANSWER:"""
         return prompt
     
     def generate_response(self, query: str, context_chunks: List[Dict[str, Any]]) -> Generator[str, None, None]:
-        """Generate response based on context (simulated for now - will integrate with actual LLM later)"""
-        
-        if not self.is_query_relevant(context_chunks):
+        """Generate AI response based on context using GPT4All"""
+        if not context_chunks:
             yield "The question is irrelevant to the document content."
             return
         
-        # Simulate AI response generation
-        # Extract key information from context
-        relevant_info = []
-        for chunk in context_chunks:
-            if chunk["similarity_score"] >= self.relevance_threshold:
-                relevant_info.append(chunk["text"])
-        
-        # Simple rule-based response for demonstration
-        if relevant_info:
-            response_parts = [
-                "Based on the document:",
-                "",
-                f"{relevant_info[0][:300]}...",
-                "",
-                "This information addresses your question from the provided context."
-            ]
-            
-            for part in response_parts:
-                yield part + "\n"
-        else:
-            yield "The question is irrelevant to the document content."
+        try:
+            # Import GPT4All generator
+            from app.services.gpt4all_generator import gpt4all_generator
+
+            # Combine context chunks
+            context_text = ""
+            for i, chunk in enumerate(context_chunks, 1):
+                page_info = f" [Page {chunk['page_number']}]" if chunk.get('page_number') else ""
+                context_text += f"[Context {i}{page_info}]: {chunk['text']}\n\n"
+
+                # Generate response with GPT4All
+                logger.info(f"Generating GPT4All response for: {query[:50]}...")
+
+                for token in gpt4all_generator.generate_response(context_text, query):
+                    yield token
+
+        except ImportError:
+            logger.warning("GPT4All not available, using fallback")
+            # Fallback to simple response
+            relevant_info = []
+            for chunk in context_chunks:
+                if chunk["similarity_score"] >= self.relevance_threshold:
+                    relevant_info.append(chunk["text"])
+
+            if relevant_info:
+                yield "Based on the document:\n\n"
+                yield f"{relevant_info[0][:500]}..."
+                if len(relevant_info[0]) > 500:
+                    yield "\n\n[Response truncated]"
+                else:
+                    yield "The question is irrelevant to the document content."
+
+        except Exception as e:
+            logger.error(f"Error generating response: {e}")
+            yield "Error generating AI response. Please try again."
     
     def get_chat_response(self, document_id: int, query: str, stream: bool = True) -> Dict[str, Any]:
         """Main method to get chat response"""
