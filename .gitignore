@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+
+# Environment variables
+.env
+
+# Databases
+*.db
+
+# Uploads
+backend/uploads/
+
+# Vector stores / ML cache
+backend/vector_stores/
+
+# Editor / OS
+.vscode/
+.DS_Store
