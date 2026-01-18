@@ -66,3 +66,31 @@ def require_auth():
         st.rerun()
         return False
     return True
+
+def require_role(required_role: str):
+    """Require specific role"""
+    if not require_auth():
+        return False
+    
+    user = get_current_user()
+    if not user:
+        return False
+    
+    user_role = user.get("role", "").lower()
+    required_role = required_role.lower()
+    
+    # Role hierarchy: superadmin > admin > user
+    role_hierarchy = {
+        "superadmin": 3,
+        "admin": 2,
+        "user": 1
+    }
+    
+    user_level = role_hierarchy.get(user_role, 0)
+    required_level = role_hierarchy.get(required_role, 0)
+    
+    if user_level >= required_level:
+        return True
+    else:
+        st.error(f"⚠️ Insufficient permissions. {required_role.title()} role required.")
+        return False

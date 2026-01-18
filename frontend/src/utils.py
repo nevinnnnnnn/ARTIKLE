@@ -91,6 +91,22 @@ def display_user_badge(user_data: Dict[str, Any]):
     with col3:
         st.write(status)
 
+def parse_sse_stream(stream):
+    """Parse Server-Sent Events stream"""
+    buffer = ""
+    for line in stream:
+        if line:
+            try:
+                line = line.decode('utf-8').strip()
+                if line.startswith('data: '):
+                    try:
+                        event_data = json.loads(line[6:])  # Remove 'data: ' prefix
+                        yield event_data
+                    except json.JSONDecodeError:
+                        continue
+            except:
+                continue
+
 def create_user_form(edit_mode: bool = False, user_data: Dict[str, Any] = None):
     """Create user form for create/edit"""
     if user_data is None:

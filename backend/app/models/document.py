@@ -22,9 +22,11 @@ class Document(Base):
     # Timestamps
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
     processed_at = Column(DateTime(timezone=True), nullable=True)
+    embeddings_created_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     uploaded_by = relationship("User", backref="documents")
+    chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Document(id={self.id}, filename='{self.filename}', is_public={self.is_public})>"
@@ -34,14 +36,24 @@ class DocumentChunk(Base):
     __tablename__ = "document_chunks"
     
     id = Column(Integer, primary_key=True, index=True)
+    chunk_index = Column(Integer, nullable=False)  # Position of this chunk in the document
+    content = Column(Text, nullable=False)  # The actual text content of the chunk
+    page_number = Column(Integer, nullable=True)  # Page number if document is paginated
+    token_count = Column(Integer, nullable=True)  # Number of tokens in this chunk
+    
+    # Vector embedding related fields
+    embedding = Column(Text, nullable=True)  # JSON string of the embedding vector
+    embedding_model = Column(String, nullable=True)  # Which model was used to create the embedding
+    
+    # Foreign keys
     document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
-    chunk_index = Column(Integer, nullable=False)  # Order of chunks
-    chunk_text = Column(Text, nullable=False)
-    page_number = Column(Integer, nullable=True)  # PDF page number
-    token_count = Column(Integer, nullable=True)  # Approximate token count
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    document = relationship("Document", backref="chunks")
+    document = relationship("Document", back_populates="chunks")
     
     def __repr__(self):
-        return f"<DocumentChunk(id={self.id}, doc_id={self.document_id}, chunk={self.chunk_index})>"
+        return f"<DocumentChunk(id={self.id}, document_id={self.document_id}, chunk_index={self.chunk_index})>"
