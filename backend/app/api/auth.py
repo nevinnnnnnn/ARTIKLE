@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 from app.database import get_db
 from app.models.user import User, UserRole
-from app.schemas.auth import Token, LoginRequest
+from app.schemas.auth import Token, LoginRequest, TokenData
 from app.auth.utils import verify_password, create_access_token, get_password_hash
 from app.schemas.user import UserCreate
 from app.utils import create_response, get_logger
@@ -14,24 +14,24 @@ logger = get_logger(__name__)
 
 @router.post("/login", response_model=Token)
 async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
+    credentials: LoginRequest,
     db: Session = Depends(get_db)
 ):
-    """Login endpoint to get JWT token"""
+    """Login endpoint to get JWT token - accepts JSON body"""
     # Try to find user by username or email
     user = db.query(User).filter(
-        (User.username == form_data.username) | (User.email == form_data.username)
+        (User.username == credentials.username) | (User.email == credentials.username)
     ).first()
     
     if not user:
-        logger.warning(f"Login attempt with non-existent user: {form_data.username}")
+        logger.warning(f"Login attempt with non-existent user: {credentials.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    if not verify_password(form_data.password, user.hashed_password):
+    if not verify_password(credentials.password, user.hashed_password):
         logger.warning(f"Failed password attempt for user: {user.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

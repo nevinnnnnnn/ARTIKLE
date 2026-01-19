@@ -5,7 +5,11 @@ logger = logging.getLogger(__name__)
 
 class ChatService:
     def __init__(self):
-        self.relevance_threshold = 0.1  # Minimum similarity score for relevance
+        self.relevance_threshold = 0.01  # Very low threshold - retrieve most content
+        self.hallucination_warnings = [
+            "i cannot find", "not in the document", "not mentioned", "unclear",
+            "not certain", "unable to determine", "not specified", "insufficient information"
+        ]
         
     def retrieve_context(self, document_id: int, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """Retrieve relevant context from document"""
@@ -35,86 +39,78 @@ class ChatService:
     
     def is_query_relevant(self, context_chunks: List[Dict[str, Any]]) -> bool:
         """Check if query is relevant to the document"""
-        if not context_chunks:
-            return False
+        # Always return true - let the model decide relevance
+        return len(context_chunks) > 0
+    
+    def detect_hallucination(self, response: str, context_chunks: List[Dict[str, Any]]) -> bool:
+        """Detect if response might be a hallucination"""
+        response_lower = response.lower()
         
-        # Check if any chunk has similarity above threshold
-        for chunk in context_chunks:
-            if chunk["similarity_score"] >= self.relevance_threshold:
+        # Check for hallucination indicators
+        for warning in self.hallucination_warnings:
+            if warning in response_lower:
+                return True
+        
+        # If response is very different from context, might be hallucination
+        if context_chunks:
+            context_text = " ".join([c["text"].lower() for c in context_chunks])
+            # Check if key terms from context appear in response (simple check)
+            context_words = set(context_text.split())
+            response_words = set(response_lower.split())
+            # If very few context words in response, suspicious
+            intersection = len(context_words & response_words)
+            if intersection < 3 and len(response) > 50:
                 return True
         
         return False
     
     def format_prompt(self, query: str, context_chunks: List[Dict[str, Any]]) -> str:
-        """Format the prompt with strict instructions"""
+        """Format the prompt for RAG"""
         
         # Combine context chunks
         context_text = ""
         for i, chunk in enumerate(context_chunks, 1):
             page_info = f" [Page {chunk['page_number']}]" if chunk.get('page_number') else ""
-            context_text += f"[Context {i}{page_info}]: {chunk['text']}\n\n"
+            context_text += f"{chunk['text']}\n\n"
         
-        # Strict prompt template
-        prompt = f"""You are a helpful assistant that answers questions based ONLY on the provided document context.
+        # Simple, effective prompt
+        prompt = f"""Based on the document content below, answer the user's question. Be direct and helpful.
 
-DOCUMENT CONTEXT:
+Document content:
 {context_text}
 
-USER QUESTION: {query}
+Question: {query}
 
-STRICT RULES:
-1. Answer the question using ONLY information from the document context above.
-2. If the answer is not found in the context, respond with: "The question is irrelevant to the document content."
-3. Do not use any external knowledge or make assumptions.
-4. If the context contains the answer, provide it clearly and concisely.
-5. Reference specific context numbers [Context X] when possible.
-6. Do not mention that you're using context or following rules.
-
-ANSWER:"""
+Answer:"""
         
         return prompt
     
     def generate_response(self, query: str, context_chunks: List[Dict[str, Any]]) -> Generator[str, None, None]:
-        """Generate AI response based on context using GPT4All"""
-        if not context_chunks:
-            yield "The question is irrelevant to the document content."
-            return
-        
+        """Generate AI response based on context"""
         try:
-            # Import GPT4All generator
-            from app.services.gpt4all_generator import gpt4all_generator
+            from app.services.ollama_generator import ollama_generator
 
-            # Combine context chunks
+            # Use all available context - don't limit to top 3
+            if not context_chunks:
+                yield "I couldn't find information in the document to answer your question."
+                return
+            
+            # Build context text from all chunks
             context_text = ""
-            for i, chunk in enumerate(context_chunks, 1):
-                page_info = f" [Page {chunk['page_number']}]" if chunk.get('page_number') else ""
-                context_text += f"[Context {i}{page_info}]: {chunk['text']}\n\n"
-
-                # Generate response with GPT4All
-                logger.info(f"Generating GPT4All response for: {query[:50]}...")
-
-                for token in gpt4all_generator.generate_response(context_text, query):
-                    yield token
-
-        except ImportError:
-            logger.warning("GPT4All not available, using fallback")
-            # Fallback to simple response
-            relevant_info = []
             for chunk in context_chunks:
-                if chunk["similarity_score"] >= self.relevance_threshold:
-                    relevant_info.append(chunk["text"])
+                context_text += f"{chunk['text']}\n\n"
 
-            if relevant_info:
-                yield "Based on the document:\n\n"
-                yield f"{relevant_info[0][:500]}..."
-                if len(relevant_info[0]) > 500:
-                    yield "\n\n[Response truncated]"
-                else:
-                    yield "The question is irrelevant to the document content."
+            logger.info(f"Generating response for: {query[:50]}... (using {len(context_chunks)} context chunks)")
+
+            # Generate response
+            full_response = ""
+            for token in ollama_generator.generate_response(context_text, query):
+                full_response += token
+                yield token
 
         except Exception as e:
-            logger.error(f"Error generating response: {e}")
-            yield "Error generating AI response. Please try again."
+            logger.error(f"Error generating response: {e}", exc_info=True)
+            yield f"Error: {str(e)}"
     
     def get_chat_response(self, document_id: int, query: str, stream: bool = True) -> Dict[str, Any]:
         """Main method to get chat response"""

@@ -48,32 +48,28 @@ class APIClient:
                 **kwargs
             )
 
-            if response.status_code == 200:
+            # Success responses
+            if response.status_code in [200, 201]:
                 return response.json()
 
-            # API error handling
+            # Error handling - return error data for caller to handle
             try:
                 error_data = response.json()
                 if "detail" in error_data:
-                    st.error(f"❌ {error_data['detail']}")
+                    return {"error": True, "detail": error_data["detail"]}
                 elif "message" in error_data:
-                    st.error(f"❌ {error_data['message']}")
+                    return {"error": True, "detail": error_data["message"]}
                 else:
-                    st.error(f"❌ API Error {response.status_code}")
+                    return {"error": True, "detail": f"API Error {response.status_code}"}
             except Exception:
-                st.error(f"❌ API Error {response.status_code}")
-
-            return None
+                return {"error": True, "detail": f"API Error {response.status_code}"}
 
         except requests.exceptions.ConnectionError:
-            st.error("⚠️ Cannot connect to backend. Is the server running?")
-            return None
+            return {"error": True, "detail": "Cannot connect to backend. Is the server running?"}
         except requests.exceptions.Timeout:
-            st.error("⚠️ Request timed out.")
-            return None
+            return {"error": True, "detail": "Request timed out."}
         except Exception as e:
-            st.error(f"❌ Request failed: {str(e)}")
-            return None
+            return {"error": True, "detail": f"Request failed: {str(e)}"}
 
     # -------------------------
     # Authentication

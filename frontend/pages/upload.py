@@ -67,36 +67,68 @@ def render_upload_page():
                 document_id = result.get("document_id")
                 st.success(f"✅ Document uploaded successfully! ID: {document_id}")
                 
-                # Show processing status
+                # Show processing status with real-time updates
                 st.markdown("---")
                 st.markdown("### ⚙️ Processing Status")
                 
-                # Step 1: Upload complete
-                col1, col2 = st.columns([1, 4])
-                with col1:
-                    st.success("✅")
-                with col2:
-                    st.markdown("**Upload Complete**")
-                    st.caption("File saved to server")
+                # Auto-refresh status every 2 seconds
+                status_placeholder = st.empty()
                 
-                # Step 2: Processing
-                col1, col2 = st.columns([1, 4])
-                with col1:
-                    st.info("⏳")
-                with col2:
-                    st.markdown("**Processing Document**")
-                    st.caption("Extracting text and creating chunks...")
-                
-                # Step 3: Creating embeddings
-                col1, col2 = st.columns([1, 4])
-                with col1:
-                    st.info("⏳")
-                with col2:
-                    st.markdown("**Creating Embeddings**")
-                    st.caption("Building vector search index...")
-                
-                st.balloons()
-                st.success("🎉 Document processing started! It will be ready for chatting shortly.")
+                max_attempts = 60  # 2 minutes max
+                for attempt in range(max_attempts):
+                    status_info = api_client.get_document_status(document_id)
+                    
+                    if status_info and 'data' in status_info:
+                        doc_status = status_info['data']
+                        status_val = doc_status.get('status', 'uploaded')
+                        
+                        with status_placeholder.container():
+                            # Step 1: Upload complete
+                            col1, col2 = st.columns([1, 4])
+                            with col1:
+                                st.success("✅")
+                            with col2:
+                                st.markdown("**Upload Complete**")
+                                st.caption("File saved to server")
+                            
+                            # Step 2: Processing
+                            col1, col2 = st.columns([1, 4])
+                            with col1:
+                                if status_val in ['processing', 'ready']:
+                                    st.success("✅")
+                                else:
+                                    st.info("⏳")
+                            with col2:
+                                st.markdown("**Processing Document**")
+                                chunk_count = doc_status.get('chunk_count', 0)
+                                if chunk_count > 0:
+                                    st.caption(f"✅ Created {chunk_count} chunks")
+                                else:
+                                    st.caption("Extracting text and creating chunks...")
+                            
+                            # Step 3: Creating embeddings
+                            col1, col2 = st.columns([1, 4])
+                            with col1:
+                                if status_val == 'ready':
+                                    st.success("✅")
+                                else:
+                                    st.info("⏳")
+                            with col2:
+                                st.markdown("**Creating Embeddings**")
+                                if status_val == 'ready':
+                                    st.caption("✅ Embeddings complete!")
+                                else:
+                                    st.caption("Building vector search index...")
+                        
+                        # Exit loop if processing complete
+                        if status_val == 'ready':
+                            st.balloons()
+                            st.success("🎉 Document ready for chatting!")
+                            break
+                    
+                    # Wait before next check
+                    if attempt < max_attempts - 1:
+                        time.sleep(2)
                 
             else:
                 st.error("❌ Failed to upload document.")

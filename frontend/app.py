@@ -8,6 +8,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Hide Streamlit's default multi-page navigation
+hide_streamlit_style = """
+            <style>
+            [data-testid="stSidebarNav"] {display: none;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
 # Initialize ALL session state variables at the TOP level
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False

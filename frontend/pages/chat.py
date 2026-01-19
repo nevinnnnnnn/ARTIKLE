@@ -1,9 +1,13 @@
 import streamlit as st
 import json
 import time
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def render_chat_page():
-    """Render the complete chat interface"""
+    """Render the complete professional chat interface"""
     
     # Check authentication
     if not st.session_state.get("authenticated", False):
@@ -13,8 +17,16 @@ def render_chat_page():
     user = st.session_state.get("current_user", {})
     role = user.get('role', 'user').lower()
     
-    st.markdown("## 🤖 Chat with PDFs")
-    st.caption("Ask questions about your documents. The AI will answer strictly from the document content.")
+    # Professional page header
+    st.set_page_config(page_title="Chat with Documents", layout="wide")
+    
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        st.markdown("## 💬")
+    with col2:
+        st.markdown("# Chat with Documents")
+    
+    st.divider()
     
     # Get API client
     api_client = st.session_state.get("api_client")
@@ -22,43 +34,45 @@ def render_chat_page():
         st.error("API client not initialized. Please refresh the page.")
         return
     
-    # Fetch documents
+    # Add refresh button
+    if st.button("🔄 Refresh Documents", key="refresh_docs"):
+        st.rerun()
+    
+    # Fetch chatable documents (processed only)
     with st.spinner("Loading available documents..."):
-        documents = api_client.get_chatable_documents()
+        response = api_client.get_chatable_documents()
+        documents = response if isinstance(response, list) else response.get('data', []) if isinstance(response, dict) else []
     
     if not documents:
-        st.warning("""
-        No documents available for chatting. 
-        
-        **For Admins/Superadmins:** Upload and process documents first.
-        **For Users:** Wait for admins to upload public documents.
-        """)
-        
         if role in ["admin", "superadmin"]:
-            if st.button("📤 Upload Documents", type="primary"):
+            st.info("""
+            **No documents available yet.**
+            
+            To get started:
+            1. Go to the Upload section
+            2. Upload a PDF document
+            3. Wait for processing to complete
+            4. Return here to chat
+            """)
+            
+            if st.button("📤 Upload Documents", type="primary", use_container_width=True):
                 st.session_state.page = "upload"
                 st.rerun()
+        else:
+            st.info("No documents available for chatting. Please ask an admin to upload documents.")
         return
     
-    # Create two columns: document selection and chat
-    col_left, col_right = st.columns([1, 2])
+    # Create two-column layout: document selector + chat
+    col_left, col_right = st.columns([1.2, 3], gap="large")
     
+    # LEFT COLUMN: Document Selection
     with col_left:
-        st.markdown("### 📚 Select Document")
+        st.markdown("### 📚 Available Documents")
         
         # Filter and sort documents
-        available_docs = []
-        for doc in documents:
-            available_docs.append(doc)
+        available_docs = sorted(documents, key=lambda x: x.get('title', '').lower())
         
-        # Sort by title
-        available_docs.sort(key=lambda x: x.get('title', '').lower())
-        
-        if not available_docs:
-            st.warning("No documents available for your role.")
-            return
-        
-        # Document selector with better UI
+        # Create document selector
         doc_options = []
         for doc in available_docs:
             icon = "🌐" if doc.get('is_public', True) else "🔒"
@@ -69,11 +83,12 @@ def render_chat_page():
                 "doc": doc
             })
         
-        # Create radio buttons for document selection
-        selected_option = st.radio(
-            "Choose a document:",
+        # Document selection
+        selected_option = st.selectbox(
+            "Select document:",
             options=[opt["label"] for opt in doc_options],
-            key="doc_selector"
+            key="doc_selector",
+            label_visibility="collapsed"
         )
         
         # Get selected document
@@ -83,23 +98,39 @@ def render_chat_page():
             selected_doc = selected_opt["doc"]
             selected_doc_id = selected_opt["value"]
             
-            # Display document info
+            # Display document info in professional card
             st.markdown("---")
-            st.markdown("#### 📋 Document Info")
-            st.markdown(f"**Title:** {selected_doc.get('title', 'Untitled')}")
-            st.markdown(f"**File:** {selected_doc.get('filename', 'Unknown')}")
-            st.markdown(f"**Visibility:** {'🌐 Public' if selected_doc.get('is_public') else '🔒 Private'}")
-            st.markdown(f"**Uploaded by:** {selected_doc.get('uploaded_by', 'Unknown')}")
-            
-            if selected_doc.get('uploaded_at'):
-                st.markdown(f"**Uploaded:** {selected_doc['uploaded_at'][:10]}")
-            
-            if selected_doc.get('processed_at'):
-                st.markdown(f"**Processed:** ✅ Ready for chat")
-            else:
-                st.markdown(f"**Status:** ⏳ Needs processing")
-                if role in ["admin", "superadmin"]:
-                    if st.button("🔄 Process Document", key=f"process_{selected_doc_id}", use_container_width=True):
+            with st.container(border=True):
+                st.markdown(f"**📄 {selected_doc.get('title', 'Untitled')}**")
+                st.caption(f"File: `{selected_doc.get('filename', 'Unknown')}`")
+                
+                # Visibility & Status
+                col_vis, col_stat = st.columns(2)
+                with col_vis:
+                    if selected_doc.get('is_public'):
+                        st.write("**Access:** 🌐 Public")
+                    else:
+                        st.write("**Access:** 🔒 Private")
+                        
+                with col_stat:
+                    if selected_doc.get('processed_at'):
+                        st.write("**Status:** ✅ Ready")
+                    else:
+                        st.write("**Status:** ⏳ Processing")
+                
+                # Metadata
+                col_m1, col_m2 = st.columns(2)
+                with col_m1:
+                    st.caption(f"**By:** {selected_doc.get('uploaded_by', 'Unknown')}")
+                with col_m2:
+                    if selected_doc.get('uploaded_at'):
+                        st.caption(f"**Date:** {selected_doc['uploaded_at'][:10]}")
+                
+                st.divider()
+                
+                # Process button if not ready
+                if not selected_doc.get('processed_at') and role in ["admin", "superadmin"]:
+                    if st.button("🔄 Process Now", key=f"process_{selected_doc_id}", use_container_width=True):
                         with st.spinner("Processing document..."):
                             result = api_client.process_document(selected_doc_id)
                             if result and result.get("success"):
@@ -111,9 +142,10 @@ def render_chat_page():
                             else:
                                 st.error("Processing failed")
     
+    # RIGHT COLUMN: Chat Interface
     with col_right:
         if not selected_opt:
-            st.info("Please select a document to start chatting.")
+            st.info("👈 **Select a document to start chatting**")
             return
         
         selected_doc = selected_opt["doc"]
@@ -122,60 +154,91 @@ def render_chat_page():
         # Check if document is processed
         if not selected_doc.get('processed_at'):
             st.warning("""
-            ⚠️ This document needs to be processed before chatting.
+            ⚠️ **This document needs to be processed first**
             
-            **Processing includes:**
-            1. Text extraction from PDF
-            2. Chunking into smaller pieces
-            3. Creating embeddings for semantic search
+            Processing includes:
+            - Text extraction from PDF
+            - Content chunking  
+            - Creating search embeddings
             
             Please ask an admin to process this document.
             """)
             return
         
-        st.markdown(f"### 💬 Chat with: **{selected_doc.get('title', 'Document')}**")
+        # Chat header
+        st.markdown(f"### 💬 Chat: **{selected_doc.get('title')}**")
+        st.caption("Ask questions about this document - the AI will answer based on its content")
+        st.divider()
         
         # Initialize chat history for this document
         chat_key = f"chat_doc_{selected_doc_id}"
         if chat_key not in st.session_state:
             st.session_state[chat_key] = []
+            # Load persistent chat history from backend
+            try:
+                history_response = api_client.make_request(
+                    method="GET",
+                    endpoint=f"/api/v1/chat/history/{selected_doc_id}"
+                )
+                if history_response and not history_response.get("error"):
+                    for chat_msg in history_response.get("data", []):
+                        # Load from DB format to session state format
+                        st.session_state[chat_key].append({
+                            "role": "user",
+                            "content": chat_msg["question"],
+                            "timestamp": chat_msg.get("timestamp", "")
+                        })
+                        st.session_state[chat_key].append({
+                            "role": "assistant",
+                            "content": chat_msg["response"],
+                            "metadata": {
+                                "top_similarity_score": chat_msg.get("relevance_score", 0),
+                                "context_chunks_retrieved": chat_msg.get("context_chunks", 0)
+                            },
+                            "timestamp": chat_msg.get("timestamp", "")
+                        })
+            except Exception as e:
+                st.warning(f"Could not load chat history: {str(e)}")
+        
+        chat_history = st.session_state[chat_key]
         
         # Display chat messages
-        chat_container = st.container()
+        if chat_history:
+            for message in chat_history:
+                if message["role"] == "user":
+                    with st.chat_message("user", avatar="👤"):
+                        st.markdown(message["content"])
+                        st.caption(f"*{message.get('timestamp', '')}*")
+                else:
+                    with st.chat_message("assistant", avatar="🤖"):
+                        st.markdown(message["content"])
+                        if message.get("metadata"):
+                            with st.expander("📊 Response Details"):
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    score = message['metadata'].get('top_similarity_score', 0)
+                                    st.metric("Relevance", f"{score:.1%}")
+                                with col2:
+                                    chunks = message['metadata'].get('context_chunks_retrieved', 0)
+                                    st.metric("Sources Used", chunks)
+                                with col3:
+                                    status = "✅ Relevant" if message['metadata'].get('is_relevant') else "⚠️ Low Match"
+                                    st.write(f"**Quality:** {status}")
+                        st.caption(f"*{message.get('timestamp', '')}*")
+        else:
+            st.info("👋 **Start your conversation below**")
         
-        with chat_container:
-            # Show chat history
-            chat_history = st.session_state[chat_key]
-            
-            if chat_history:
-                st.markdown("#### 📝 Conversation")
-                for i, message in enumerate(chat_history):
-                    if message["role"] == "user":
-                        with st.chat_message("user"):
-                            st.markdown(message["content"])
-                            if message.get("timestamp"):
-                                st.caption(message["timestamp"])
-                    else:
-                        with st.chat_message("assistant"):
-                            st.markdown(message["content"])
-                            if message.get("metadata"):
-                                with st.expander("📊 Response Details"):
-                                    st.json(message["metadata"])
-                            if message.get("timestamp"):
-                                st.caption(message["timestamp"])
-            
-            # Current conversation area
-            st.markdown("---")
+        st.divider()
         
-        # Input for new question - placed outside the container
+        # Input area
         question = st.chat_input(
-            f"Ask a question about {selected_doc.get('title', 'the document')}...",
+            f"Ask about {selected_doc.get('title')}...",
             key=f"chat_input_{selected_doc_id}"
         )
         
         # Handle new question
         if question:
-            # Add user message to history and display immediately
+            # Add user message to history immediately
             user_message = {
                 "role": "user",
                 "content": question,
@@ -184,101 +247,165 @@ def render_chat_page():
             st.session_state[chat_key].append(user_message)
             
             # Display user message
-            with chat_container:
-                with st.chat_message("user"):
-                    st.markdown(question)
-                    st.caption(user_message["timestamp"])
+            with st.chat_message("user", avatar="👤"):
+                st.markdown(question)
+                st.caption(f"*{user_message['timestamp']}*")
             
-            # Get AI response with streaming
-            with st.spinner("🤔 Thinking..."):
+            # Get AI response
+            with st.spinner("🤖 AI is thinking..."):
                 try:
-                    # Get streaming response
                     stream = api_client.chat_stream(selected_doc_id, question)
                     
                     if stream:
-                        # Create a placeholder for the streaming response
                         response_placeholder = st.empty()
                         full_response = ""
                         metadata = {}
+                        stream_complete = False
                         
-                        # Parse the SSE stream
                         def parse_sse_stream(stream):
-                            """Parse Server-Sent Events stream"""
-                            for line in stream:
-                                if line:
-                                    try:
-                                        line = line.decode('utf-8').strip()
-                                        if line.startswith('data: '):
-                                            try:
-                                                event_data = json.loads(line[6:])  # Remove 'data: ' prefix
-                                                yield event_data
-                                            except json.JSONDecodeError:
-                                                continue
-                                    except:
-                                        continue
+                            """Parse SSE stream with robust error handling"""
+                            try:
+                                for line in stream:
+                                    if line:
+                                        try:
+                                            line_str = line.decode('utf-8').strip() if isinstance(line, bytes) else str(line).strip()
+                                            if line_str.startswith('data: '):
+                                                try:
+                                                    event_data = json.loads(line_str[6:])
+                                                    yield event_data
+                                                except json.JSONDecodeError:
+                                                    continue
+                                        except Exception as e:
+                                            continue
+                            except Exception as e:
+                                st.error(f"Stream error: {str(e)}")
                         
                         for event_data in parse_sse_stream(stream):
-                            if event_data["type"] == "metadata":
-                                metadata = event_data["data"]
-                            elif event_data["type"] == "text":
-                                chunk = event_data["data"]
-                                full_response += chunk
-                                # Update the placeholder with the current response
-                                with response_placeholder.chat_message("assistant"):
-                                    st.markdown(full_response + "▌")
-                            elif event_data["type"] == "complete":
-                                # Finalize the response
-                                with response_placeholder.chat_message("assistant"):
+                            try:
+                                if event_data.get("type") == "metadata":
+                                    metadata = event_data.get("data", {})
+                                elif event_data.get("type") == "text":
+                                    chunk = event_data.get("data", "")
+                                    if chunk:
+                                        full_response += chunk
+                                        # Display streaming response
+                                        with response_placeholder.container():
+                                            with st.chat_message("assistant", avatar="🤖"):
+                                                st.markdown(full_response + " ▌")
+                                elif event_data.get("type") == "complete":
+                                    stream_complete = True
+                                    # Final response display
+                                    with response_placeholder.container():
+                                        with st.chat_message("assistant", avatar="🤖"):
+                                            if full_response:
+                                                st.markdown(full_response)
+                                            else:
+                                                st.write("*(No response generated)*")
+                                            
+                                            if metadata:
+                                                with st.expander("📊 Response Details"):
+                                                    col1, col2, col3 = st.columns(3)
+                                                    with col1:
+                                                        score = metadata.get('top_similarity_score', 0)
+                                                        st.metric("Relevance", f"{score:.1%}")
+                                                    with col2:
+                                                        chunks = metadata.get('context_chunks_retrieved', 0)
+                                                        st.metric("Sources", chunks)
+                                                    with col3:
+                                                        status = "✅" if metadata.get('is_relevant') else "ℹ️"
+                                                        st.write(f"**Quality:** {status}")
+                                            st.caption(f"*{time.strftime('%H:%M:%S')}*")
+                                    break
+                                elif event_data.get("type") == "error":
+                                    error_msg = event_data.get("data", {}).get("message", "Unknown error")
+                                    with response_placeholder.container():
+                                        st.error(f"⚠️ {error_msg}")
+                                    stream_complete = True
+                                    break
+                            except KeyError:
+                                # Malformed event, skip it
+                                continue
+                        
+                        # If stream ended without complete event, show what we have
+                        if not stream_complete and full_response and full_response not in ["Error", ""]:
+                            with response_placeholder.container():
+                                with st.chat_message("assistant", avatar="🤖"):
                                     st.markdown(full_response)
                                     if metadata:
                                         with st.expander("📊 Response Details"):
-                                            st.write(f"**Relevant:** {metadata.get('is_relevant', 'Unknown')}")
-                                            st.write(f"**Context chunks used:** {metadata.get('context_chunks_retrieved', 0)}")
-                                            st.write(f"**Similarity score:** {metadata.get('top_similarity_score', 0):.3f}")
-                                    st.caption(time.strftime("%H:%M:%S"))
-                                break
-                            elif event_data["type"] == "error":
-                                st.error(f"Error: {event_data['data'].get('message', 'Unknown error')}")
-                                break
+                                            col1, col2, col3 = st.columns(3)
+                                            with col1:
+                                                score = metadata.get('top_similarity_score', 0)
+                                                st.metric("Relevance", f"{score:.1%}")
+                                            with col2:
+                                                chunks = metadata.get('context_chunks_retrieved', 0)
+                                                st.metric("Sources", chunks)
+                                            with col3:
+                                                status = "✅" if metadata.get('is_relevant') else "ℹ️"
+                                                st.write(f"**Quality:** {status}")
+                                    st.caption(f"*{time.strftime('%H:%M:%S')}*")
                         
-                        # Add AI response to history
-                        ai_message = {
+                        # Add response to history - CRITICAL FIX
+                        if full_response:
+                            ai_message = {
+                                "role": "assistant",
+                                "content": full_response,
+                                "metadata": metadata,
+                                "timestamp": time.strftime("%H:%M:%S")
+                            }
+                            st.session_state[chat_key].append(ai_message)
+                        else:
+                            # No response generated, add error message
+                            ai_message = {
+                                "role": "assistant",
+                                "content": "❌ No response was generated. Please try again.",
+                                "metadata": metadata,
+                                "timestamp": time.strftime("%H:%M:%S")
+                            }
+                            st.session_state[chat_key].append(ai_message)
+                    else:
+                        st.error("❌ Failed to get response. Please try again.")
+                        error_message = {
                             "role": "assistant",
-                            "content": full_response,
-                            "metadata": metadata,
+                            "content": "❌ Failed to get response from the server.",
+                            "metadata": {},
                             "timestamp": time.strftime("%H:%M:%S")
                         }
-                        st.session_state[chat_key].append(ai_message)
-                        
-                    else:
-                        st.error("Failed to get response from AI. Please try again.")
+                        st.session_state[chat_key].append(error_message)
                         
                 except Exception as e:
-                    st.error(f"Error during chat: {str(e)}")
+                    st.error(f"❌ Error: {str(e)}")
+                    error_message = {
+                        "role": "assistant",
+                        "content": f"❌ Error occurred: {str(e)}",
+                        "metadata": {},
+                        "timestamp": time.strftime("%H:%M:%S")
+                    }
+                    st.session_state[chat_key].append(error_message)
         
-        # Chat controls
-        st.markdown("---")
+        # Controls
+        st.divider()
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("🔄 Refresh Chat", use_container_width=True, help="Clear and start fresh"):
+            if st.button("🗑️ Clear Chat", use_container_width=True):
                 st.session_state[chat_key] = []
                 st.rerun()
         
         with col2:
-            if st.button("📋 Export Chat", use_container_width=True, help="Export conversation to text file"):
+            if st.button("💾 Export Chat", use_container_width=True):
                 if chat_history:
-                    export_text = f"Chat with: {selected_doc.get('title', 'Document')}\n"
+                    export_text = f"Chat: {selected_doc.get('title', 'Document')}\n"
                     export_text += f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                    export_text += "=" * 50 + "\n\n"
+                    export_text += "=" * 60 + "\n\n"
                     
                     for message in chat_history:
-                        role = "User" if message["role"] == "user" else "AI"
+                        role = "👤 User" if message["role"] == "user" else "🤖 AI"
                         export_text += f"{role} ({message.get('timestamp', '')}):\n"
                         export_text += f"{message['content']}\n\n"
                     
                     st.download_button(
-                        label="Download Chat",
+                        label="Download",
                         data=export_text,
                         file_name=f"chat_{selected_doc_id}_{time.strftime('%Y%m%d_%H%M%S')}.txt",
                         mime="text/plain",
@@ -288,20 +415,23 @@ def render_chat_page():
                     st.warning("No chat history to export")
         
         with col3:
-            if st.button("ℹ️ Chat Instructions", use_container_width=True, help="How to use the chat"):
-                with st.expander("Chat Instructions", expanded=True):
+            if st.button("💡 Tips", use_container_width=True):
+                with st.expander("How to Get Better Answers"):
                     st.markdown("""
-                    **How to get the best results:**
+                    **✅ Best Practices:**
+                    - Ask specific, focused questions
+                    - Reference page numbers when available
+                    - Use keywords from the document
+                    - Ask one question at a time
                     
-                    1. **Ask specific questions** - Instead of "Tell me about this document", ask "What are the main points in section 3?"
-                    2. **Reference page numbers** - If you know the page, mention it: "On page 5, what does it say about..."
-                    3. **Ask one question at a time** - The AI works best with focused questions
-                    4. **Use keywords** - The AI searches for similar content in the document
+                    **❌ Avoid:**
+                    - Questions unrelated to the document
+                    - Vague or unclear phrasing
+                    - Multiple questions at once
+                    - Expecting external knowledge
                     
-                    **What to expect:**
-                    - ✅ Answers based ONLY on the document content
-                    - ❌ "The question is irrelevant" when answer isn't in the document
-                    - 📊 Response details show how relevant the answer is
-                    
-                    **Note:** The AI cannot use external knowledge or make assumptions.
+                    **Examples:**
+                    - "What are the key findings in section 3?"
+                    - "On page 5, what does it say about..."
+                    - "Summarize the main conclusion"
                     """)

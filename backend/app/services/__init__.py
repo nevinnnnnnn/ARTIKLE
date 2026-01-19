@@ -1,16 +1,16 @@
 from app.services.pdf_processor import pdf_processor, PDFProcessor
-# Use embeddings_backup instead of minimal_embeddings
-from app.services.embeddings_backup import embedding_service, EmbeddingService
+# Use fast_embeddings for better performance
+from app.services.fast_embeddings import embedding_service, FastEmbeddingService
 from app.services.chat_service import chat_service, ChatService
-from app.services.gpt4all_generator import gpt4all_generator, GPT4AllGenerator
+from app.services.ollama_generator import ollama_generator, OllamaGenerator
 
 __all__ = [
     "pdf_processor", 
     "PDFProcessor",
     "embedding_service", 
-    "EmbeddingService",
+    "FastEmbeddingService",
     "chat_service",
     "ChatService",
-    "gpt4all_generator",
-    "GPT4AllGenerator"
+    "ollama_generator",
+    "OllamaGenerator"
 ]

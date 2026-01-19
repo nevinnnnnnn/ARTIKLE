@@ -7,6 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
+# Import all models to ensure they're registered with Base
+from app.models import user, document, chat_history
 from app.api import auth, users, documents, chat  # Add chat
 from app.auth.dependencies import require_user, require_admin, require_superadmin
 

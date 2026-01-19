@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import json
 import time
+import asyncio
 
 from app.database import get_db
 from app.models.document import Document
@@ -11,6 +12,7 @@ from app.models.user import User, UserRole
 from app.schemas.chat import ChatRequest, ChatResponse  # We'll create this
 from app.auth.dependencies import require_user
 from app.services.chat_service import chat_service
+from app.services.chat_persistence import chat_persistence
 from app.utils import get_logger
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -22,7 +24,7 @@ async def chat_stream(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user)
 ):
-    """Streaming chat endpoint with RAG"""
+    """Streaming chat endpoint with RAG + persistence"""
     
     # Validate document exists and user has access
     document = db.query(Document).filter(Document.id == request.document_id).first()
@@ -57,21 +59,35 @@ async def chat_stream(
     
     logger.info(f"Chat request from {current_user.username} for document {document.id}: {request.query[:50]}...")
     
-    # Get chat response
-    chat_result = chat_service.get_chat_response(
-        document_id=request.document_id,
-        query=request.query,
-        stream=True
-    )
+    # Get chat response with timeout
+    try:
+        chat_result = await asyncio.wait_for(
+            asyncio.to_thread(
+                chat_service.get_chat_response,
+                document_id=request.document_id,
+                query=request.query,
+                stream=True
+            ),
+            timeout=120  # 2 minute timeout
+        )
+    except asyncio.TimeoutError:
+        logger.error("Chat generation timeout")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Chat generation took too long. Please try again."
+        )
     
     # Create streaming response
     async def event_stream():
         """Generator for Server-Sent Events"""
         
+        full_response = ""
+        metadata = chat_result["metadata"]
+        
         # Send metadata first
         metadata_event = {
             "type": "metadata",
-            "data": chat_result["metadata"]
+            "data": metadata
         }
         yield f"data: {json.dumps(metadata_event)}\n\n"
         
@@ -79,13 +95,12 @@ async def chat_stream(
         try:
             for chunk in chat_result["stream_generator"]:
                 if chunk:
+                    full_response += chunk
                     text_event = {
                         "type": "text",
                         "data": chunk
                     }
                     yield f"data: {json.dumps(text_event)}\n\n"
-                    # Small delay to simulate streaming
-                    # time.sleep(0.05)
             
             # Send completion event
             completion_event = {
@@ -93,6 +108,20 @@ async def chat_stream(
                 "data": {"status": "completed"}
             }
             yield f"data: {json.dumps(completion_event)}\n\n"
+            
+            # Save to database (async)
+            try:
+                chat_persistence.save_chat(
+                    db=db,
+                    user_id=current_user.id,
+                    document_id=request.document_id,
+                    question=request.query,
+                    response=full_response,
+                    relevance_score=metadata.get("top_similarity_score", 0.0),
+                    context_chunks=metadata.get("context_chunks_retrieved", 0)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save chat to DB: {e}")
             
         except Exception as e:
             logger.error(f"Error in chat stream: {e}")
@@ -108,7 +137,8 @@ async def chat_stream(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # Disable buffering for nginx
+            "X-Accel-Buffering": "no",  # Disable buffering for nginx
+            "Timeout": "120"  # 2 minute timeout
         }
     )
 
@@ -214,4 +244,115 @@ async def get_chatable_documents(
         "success": True,
         "message": f"Found {len(result)} chatable documents",
         "data": result
+    }
+
+
+@router.get("/history/{document_id}")
+async def get_chat_history(
+    document_id: int,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user)
+):
+    """Get persistent chat history for a document"""
+    
+    # Validate document access
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+    
+    # Check permissions
+    if not document.is_public and current_user.role == UserRole.USER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this document"
+        )
+    
+    if (document.is_public == False and 
+        current_user.role == UserRole.ADMIN and 
+        document.uploaded_by_id != current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this document"
+        )
+    
+    # Get chat history
+    history = chat_persistence.get_chat_history(
+        db=db,
+        user_id=current_user.id,
+        document_id=document_id,
+        limit=limit
+    )
+    
+    return {
+        "success": True,
+        "message": f"Retrieved {len(history)} chat messages",
+        "data": history
+    }
+
+
+@router.get("/history")
+async def get_all_chat_history(
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user)
+):
+    """Get all persistent chat history for current user"""
+    
+    history = chat_persistence.get_chat_history(
+        db=db,
+        user_id=current_user.id,
+        limit=limit
+    )
+    
+    # Get statistics
+    stats = chat_persistence.get_chat_statistics(db=db, user_id=current_user.id)
+    
+    return {
+        "success": True,
+        "message": f"Retrieved {len(history)} chat messages",
+        "statistics": stats,
+        "data": history
+    }
+
+
+@router.delete("/history/{document_id}")
+async def clear_chat_history(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user)
+):
+    """Clear chat history for a specific document"""
+    
+    # Validate document access
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+    
+    # Check permissions (only superadmin and document owner)
+    if current_user.role not in [UserRole.SUPERADMIN, UserRole.ADMIN] or \
+       (current_user.role == UserRole.ADMIN and document.uploaded_by_id != current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to clear this history"
+        )
+    
+    # Clear history
+    success = chat_persistence.clear_chat_history(
+        db=db,
+        user_id=current_user.id,
+        document_id=document_id
+    )
+    
+    return {
+        "success": success,
+        "message": "Chat history cleared successfully" if success else "Failed to clear history"
     }

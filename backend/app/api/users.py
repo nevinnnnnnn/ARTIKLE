@@ -104,33 +104,54 @@ async def create_user(
     current_user: User = Depends(require_superadmin)
 ):
     """Create a new user (superadmin only)"""
-    # Check if user already exists
-    existing_user = db.query(User).filter(
-        (User.email == user_data.email) | (User.username == user_data.username)
-    ).first()
-    
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email or username already exists"
+    try:
+        # Validate input
+        if not user_data.username or not user_data.email or not user_data.password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username, email, and password are required"
+            )
+        
+        # Check if user already exists
+        existing_user = db.query(User).filter(
+            (User.email == user_data.email) | (User.username == user_data.username)
+        ).first()
+        
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User with this email or username already exists"
+            )
+        
+        # Create new user with default role
+        hashed_password = get_password_hash(user_data.password)
+        user_role = UserRole(user_data.role) if user_data.role else UserRole.USER
+        
+        db_user = User(
+            email=user_data.email,
+            username=user_data.username,
+            hashed_password=hashed_password,
+            full_name=user_data.full_name or "",
+            role=user_role,
+            is_active=True
         )
+        
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        
+        logger.info(f"User created by {current_user.username}: {db_user.username} ({db_user.role})")
+        return db_user
     
-    # Create new user
-    hashed_password = get_password_hash(user_data.password)
-    db_user = User(
-        email=user_data.email,
-        username=user_data.username,
-        hashed_password=hashed_password,
-        full_name=user_data.full_name,
-        role=user_data.role
-    )
-    
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    
-    logger.info(f"User created by {current_user.username}: {db_user.username} ({db_user.role})")
-    return db_user
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating user: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating user: {str(e)}"
+        )
 
 @router.get("/{user_id}", response_model=UserSchema)
 async def get_user(

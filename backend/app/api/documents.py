@@ -57,7 +57,7 @@ async def auto_process_document(document_id: int, user_id: int):
                 DocumentChunk(
                     document_id=document.id,
                     chunk_index=idx,
-                    chunk_text=chunk_text,
+                    content=chunk_text,
                     page_number=page_number,
                     token_count=token_count
                 )
@@ -78,7 +78,7 @@ async def auto_process_document(document_id: int, user_id: int):
         metadata = []
 
         for chunk in chunks:
-            texts.append(chunk.chunk_text)
+            texts.append(chunk.content)
             metadata.append({
                 "chunk_id": chunk.id,
                 "document_id": document_id,

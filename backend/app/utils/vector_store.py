@@ -6,7 +6,6 @@ from typing import List, Tuple, Optional, Dict, Any
 from datetime import datetime
 from sklearn.metrics.pairwise import cosine_similarity
 from app.config import settings
-from app.services import embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +47,9 @@ class VectorStore:
     
     def _initialize_new_store(self):
         """Initialize a new empty vector store"""
+        # Import here to avoid circular imports
+        from app.services.fast_embeddings import embedding_service
+        
         # Initialize with correct dimension
         embedding_dim = embedding_service.get_embedding_dimension()
         self.embeddings = np.array([]).reshape(0, embedding_dim)
@@ -71,6 +73,8 @@ class VectorStore:
     
     def add_texts(self, texts: List[str], metadata_list: List[Dict[str, Any]]):
         """Add texts by creating embeddings and storing them"""
+        from app.services.fast_embeddings import embedding_service
+        
         embeddings = embedding_service.create_embeddings(texts)
         self.add_embeddings(embeddings, metadata_list)
     
@@ -78,6 +82,8 @@ class VectorStore:
         """Search for similar texts using cosine similarity"""
         if len(self.embeddings) == 0:
             return []
+        
+        from app.services.fast_embeddings import embedding_service
         
         # Create embedding for query
         query_embedding = embedding_service.create_single_embedding(query)
@@ -127,6 +133,8 @@ class VectorStore:
     
     def clear(self):
         """Clear the vector store"""
+        from app.services.fast_embeddings import embedding_service
+        
         embedding_dim = embedding_service.get_embedding_dimension()
         self.embeddings = np.array([]).reshape(0, embedding_dim)
         self.metadata = []
