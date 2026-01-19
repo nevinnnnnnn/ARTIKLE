@@ -58,14 +58,17 @@ class OllamaGenerator:
     
     def format_prompt(self, context: str, question: str) -> str:
         """Format prompt for RAG - Anti-hallucination version"""
-        return f"""You are a helpful assistant that answers questions ONLY based on the provided document content.
+        return f"""act as a super intelligent assistant that answers questions ONLY based on the provided document content.
 
-**STRICT RULES:**
-1. ONLY use information from the document below
+**RULES TO FOLLOW:**
+1. ONLY use information from the document uploaded by the user to asswer the question.
 2. If the answer is NOT in the document, respond: "I cannot find this information in the document."
 3. Always cite which part of the document your answer comes from
 4. Do NOT make up, infer, or add information not in the document
 5. If unsure, say "I'm not certain about this based on the document"
+6. Avoid vague answers - be specific based on the document
+7. Keep answers concise and to the point
+8. NEVER refer to external knowledge or sources
 
 Document Content:
 {context}

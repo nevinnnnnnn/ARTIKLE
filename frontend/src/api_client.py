@@ -1,7 +1,6 @@
 import requests
 import streamlit as st
 from typing import Optional, Dict, Any, List, Iterator
-import urllib.parse
 
 
 class APIClient:
@@ -76,20 +75,17 @@ class APIClient:
     # -------------------------
 
     def login(self, username: str, password: str) -> Optional[Dict[str, Any]]:
-        """Login using OAuth2 password flow"""
+        """Login using JSON body - FastAPI expects JSON, not form data"""
 
-        form_data = {
+        payload = {
             "username": username,
             "password": password
         }
 
-        encoded_data = urllib.parse.urlencode(form_data)
-
         response = self.make_request(
             "POST",
             "/api/v1/auth/login",
-            data=encoded_data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"}
+            json=payload
         )
 
         if response and "access_token" in response:
@@ -262,7 +258,7 @@ class APIClient:
                     "query": query
                 },
                 stream=True,
-                timeout=30
+                timeout=180  # Increased to 180s for long-running responses
             )
 
             if response.status_code == 200:

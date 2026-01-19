@@ -32,6 +32,12 @@ def render_documents_page():
     st.markdown(f"### Found {len(documents)} documents")
     
     for doc in documents:
+        # Handle case where doc might be returned as string from API
+        if isinstance(doc, str):
+            continue
+        if not isinstance(doc, dict):
+            continue
+            
         with st.container():
             col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
             

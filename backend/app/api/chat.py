@@ -68,7 +68,7 @@ async def chat_stream(
                 query=request.query,
                 stream=True
             ),
-            timeout=120  # 2 minute timeout
+            timeout=180  # 3 minute timeout for very long responses
         )
     except asyncio.TimeoutError:
         logger.error("Chat generation timeout")
