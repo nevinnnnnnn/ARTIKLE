@@ -48,10 +48,10 @@ class VectorStore:
     def _initialize_new_store(self):
         """Initialize a new empty vector store"""
         # Import here to avoid circular imports
-        from app.services.fast_embeddings import embedding_service
+        from app.services.gemini_service import GeminiEmbeddings
         
         # Initialize with correct dimension
-        embedding_dim = embedding_service.get_embedding_dimension()
+        embedding_dim = GeminiEmbeddings.get_dimension()
         self.embeddings = np.array([]).reshape(0, embedding_dim)
         self.metadata = []
         
@@ -73,9 +73,9 @@ class VectorStore:
     
     def add_texts(self, texts: List[str], metadata_list: List[Dict[str, Any]]):
         """Add texts by creating embeddings and storing them"""
-        from app.services.fast_embeddings import embedding_service
+        from app.services.gemini_service import GeminiEmbeddings
         
-        embeddings = embedding_service.create_embeddings(texts)
+        embeddings = np.array([GeminiEmbeddings.create_embedding(text) for text in texts])
         self.add_embeddings(embeddings, metadata_list)
     
     def similarity_search(self, query: str, k: int = 5, threshold: float = 0.5) -> List[Tuple[Dict[str, Any], float]]:
@@ -83,11 +83,11 @@ class VectorStore:
         if len(self.embeddings) == 0:
             return []
         
-        from app.services.fast_embeddings import embedding_service
+        from app.services.gemini_service import GeminiEmbeddings
         
         # Create embedding for query
-        query_embedding = embedding_service.create_single_embedding(query)
-        query_embedding = query_embedding.reshape(1, -1)
+        query_embedding = GeminiEmbeddings.create_embedding(query)
+        query_embedding = np.array(query_embedding).reshape(1, -1)
         
         # Calculate cosine similarity
         similarities = cosine_similarity(query_embedding, self.embeddings)[0]
@@ -133,9 +133,9 @@ class VectorStore:
     
     def clear(self):
         """Clear the vector store"""
-        from app.services.fast_embeddings import embedding_service
+        from app.services.gemini_service import GeminiEmbeddings
         
-        embedding_dim = embedding_service.get_embedding_dimension()
+        embedding_dim = GeminiEmbeddings.get_dimension()
         self.embeddings = np.array([]).reshape(0, embedding_dim)
         self.metadata = []
         

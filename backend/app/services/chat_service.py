@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 class ChatService:
     def __init__(self):
-        self.relevance_threshold = 0.01  # Very low threshold - retrieve most content
+        self.relevance_threshold = 0.1  # Lower threshold - get more relevant context
         self.hallucination_warnings = [
             "i cannot find", "not in the document", "not mentioned", "unclear",
             "not certain", "unable to determine", "not specified", "insufficient information"
@@ -22,11 +22,13 @@ class ChatService:
             # Format results
             context_chunks = []
             for metadata, similarity in results:
+                # Use 'content' field if available, otherwise fall back to text_preview
+                text_content = metadata.get("content", metadata.get("text_preview", ""))
                 context_chunks.append({
                     "chunk_id": metadata["chunk_id"],
                     "chunk_index": metadata["chunk_index"],
                     "page_number": metadata.get("page_number"),
-                    "text": metadata.get("text_preview", "").replace("...", ""),
+                    "text": text_content,
                     "similarity_score": similarity
                 })
             
@@ -65,7 +67,7 @@ class ChatService:
         return False
     
     def format_prompt(self, query: str, context_chunks: List[Dict[str, Any]]) -> str:
-        """Format the prompt for RAG"""
+        """Format the prompt for RAG - optimized to prevent hallucination"""
         
         # Combine context chunks
         context_text = ""
@@ -73,24 +75,31 @@ class ChatService:
             page_info = f" [Page {chunk['page_number']}]" if chunk.get('page_number') else ""
             context_text += f"{chunk['text']}\n\n"
         
-        # Simple, effective prompt
-        prompt = f"""Based on the document content below, answer the user's question. Be direct and helpful.
+        # Strict prompt to prevent hallucination, with clear formatting
+        prompt = f"""You are an assistant that answers questions based ONLY on provided documents.
 
-Document content:
+CRITICAL RULES:
+1. ONLY use information explicitly stated in the document
+2. Do NOT use any external knowledge or training data
+3. Do NOT make assumptions, inferences, or extrapolations
+4. Provide a complete, detailed answer using the document content
+5. If information is not in the document, say: "I cannot find this information in the document."
+6. Be specific and quote relevant parts when applicable
+
+Document Content:
 {context_text}
 
-Question: {query}
+User Question: {query}
 
-Answer:"""
+Complete Answer (based ONLY on the document above):"""
         
         return prompt
     
     def generate_response(self, query: str, context_chunks: List[Dict[str, Any]]) -> Generator[str, None, None]:
         """Generate AI response based on context"""
         try:
-            from app.services.ollama_generator import ollama_generator
+            from app.services.gemini_service import GeminiChat
 
-            # Use all available context - don't limit to top 3
             if not context_chunks:
                 yield "I couldn't find information in the document to answer your question."
                 return
@@ -102,11 +111,16 @@ Answer:"""
 
             logger.info(f"Generating response for: {query[:50]}... (using {len(context_chunks)} context chunks)")
 
-            # Generate response
-            full_response = ""
-            for token in ollama_generator.generate_response(context_text, query):
-                full_response += token
-                yield token
+            # Generate response using Gemini
+            response = GeminiChat.generate_response(
+                query=query,
+                context_text=context_text,
+                temperature=0.3,
+                max_tokens=1024
+            )
+            
+            # Yield the entire response at once (Gemini API returns full response)
+            yield response
 
         except Exception as e:
             logger.error(f"Error generating response: {e}", exc_info=True)

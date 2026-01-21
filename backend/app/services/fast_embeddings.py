@@ -1,138 +1,158 @@
 """
-Optimized Embedding Service - Fast & Lightweight
+Fast embeddings using TF-IDF + semantic similarity
+Lightweight and efficient - no heavy dependencies
+With LRU caching for frequently used vectors
 """
+
 import logging
 import numpy as np
-from typing import List
+import pickle
 import os
-import warnings
-from app.config import settings
+from typing import List, Dict
+from functools import lru_cache
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.decomposition import PCA
 
 logger = logging.getLogger(__name__)
 
-# Suppress verbose library warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-# Suppress huggingface warnings
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["TRANSFORMERS_CACHE"] = os.path.join(settings.VECTOR_STORE_DIR, "model_cache")
-
-# Flag for sentence-transformers availability
-HAS_SENTENCE_TRANSFORMERS = False
-
-try:
-    from sentence_transformers import SentenceTransformer
-    HAS_SENTENCE_TRANSFORMERS = True
-    logger.info("✓ Embedding model (sentence-transformers) loaded successfully")
-except (ImportError, OSError, Exception) as e:
-    logger.debug(f"sentence-transformers unavailable, using fallback: {type(e).__name__}")
 
 class FastEmbeddingService:
+    """Fast embedding service using TF-IDF vectors with dimensionality reduction"""
+    
     def __init__(self):
-        self.model_name = "all-MiniLM-L6-v2"
-        self.model = None
-        self.embedding_dim = 384
-        self.load_model()
+        """Initialize embedding service"""
+        self.vectorizer = TfidfVectorizer(max_features=500, analyzer='char', ngram_range=(2, 3))
+        self.pca = None
+        self.embedding_dim = 384  # Target dimension (matches all-MiniLM-L6-v2)
+        self.fitted = False
+        self._embedding_cache: Dict[str, np.ndarray] = {}  # LRU cache for embeddings
+        self._cache_max_size = 1000
+        logger.info("✓ Embedding service initialized (TF-IDF mode with caching)")
     
-    def load_model(self):
-        """Load the embedding model - optimized version"""
-        try:
-            if HAS_SENTENCE_TRANSFORMERS:
-                logger.debug(f"Loading embedding model: {self.model_name}")
+    def _ensure_fit(self, texts: List[str]):
+        """Fit vectorizer and PCA on first batch of texts"""
+        if not self.fitted and texts:
+            try:
+                # Fit TF-IDF vectorizer
+                tfidf_vectors = self.vectorizer.fit_transform(texts)
                 
-                # Use cache directory
-                cache_dir = os.path.join(settings.VECTOR_STORE_DIR, "model_cache")
-                os.makedirs(cache_dir, exist_ok=True)
+                # Fit PCA for dimensionality reduction
+                tfidf_dim = tfidf_vectors.shape[1]
+                target_dim = min(self.embedding_dim, tfidf_dim)
+                self.pca = PCA(n_components=target_dim)
+                self.pca.fit(tfidf_vectors.toarray())
                 
-                # Suppress transformer logging during load
-                transformers_logger = logging.getLogger("transformers")
-                old_level = transformers_logger.level
-                transformers_logger.setLevel(logging.ERROR)
-                
-                try:
-                    # Load with sentence-transformers (already optimized)
-                    self.model = SentenceTransformer(
-                        self.model_name,
-                        cache_folder=cache_dir,
-                        device="cpu"  # Use CPU for better compatibility
-                    )
-                    
-                    self.embedding_dim = self.model.get_sentence_embedding_dimension()
-                    logger.info(f"✓ Embedding model ready (dimension: {self.embedding_dim})")
-                finally:
-                    transformers_logger.setLevel(old_level)
-            else:
-                # Fallback to simple hash-based embeddings (for demo/testing)
-                logger.info("✓ Using fallback embedding method (hash-based, dimension: 384)")
-                self.embedding_dim = 384
-                
-        except Exception as e:
-            logger.error(f"Failed to load embedding model: {e}")
-            logger.info("✓ Using fallback embedding method (hash-based, dimension: 384)")
-            self.embedding_dim = 384
+                self.fitted = True
+                logger.debug(f"Fitted vectorizer and PCA ({tfidf_dim} -> {target_dim} dims)")
+            except Exception as e:
+                logger.error(f"Error fitting vectorizer: {e}")
+                self.fitted = True  # Mark as fitted to prevent infinite loops
     
-    def _create_fallback_embeddings(self, texts: List[str]) -> np.ndarray:
-        """Create simple hash-based embeddings as fallback"""
-        embeddings = []
-        for text in texts:
-            # Create a simple embedding by hashing the text
-            # This is not ML-based but works for vector store operations
-            hash_val = hash(text) & 0x7FFFFFFF  # Make positive
-            # Create embedding by using hash to seed random-like values
-            np.random.seed(hash_val % (2**31))
-            embedding = np.random.randn(self.embedding_dim).astype(np.float32)
-            # Normalize
-            embedding = embedding / (np.linalg.norm(embedding) + 1e-8)
-            embeddings.append(embedding)
-        return np.array(embeddings)
+    def get_embedding_dimension(self) -> int:
+        """Get the dimension of embeddings"""
+        return self.embedding_dim
+    
+    def _clear_cache_if_needed(self):
+        """Clear old cache entries if cache exceeds max size"""
+        if len(self._embedding_cache) > self._cache_max_size:
+            # Keep only 80% of max size
+            to_remove = len(self._embedding_cache) - int(self._cache_max_size * 0.8)
+            for key in list(self._embedding_cache.keys())[:to_remove]:
+                del self._embedding_cache[key]
     
     def create_embeddings(self, texts: List[str]) -> np.ndarray:
-        """Create embeddings for texts - fast version"""
+        """
+        Create embeddings for multiple texts using TF-IDF with caching
+        
+        Args:
+            texts: List of text strings
+        
+        Returns:
+            numpy array of shape (len(texts), embedding_dim)
+        """
         if not texts:
             return np.array([]).reshape(0, self.embedding_dim)
         
         try:
-            if HAS_SENTENCE_TRANSFORMERS and self.model is not None:
-                # Batch encode for efficiency
-                embeddings = self.model.encode(
-                    texts,
-                    batch_size=64,  # Larger batch for faster processing
-                    show_progress_bar=False,
-                    convert_to_numpy=True
-                )
-            else:
-                # Use fallback
-                embeddings = self._create_fallback_embeddings(texts)
+            # Ensure vectorizer is fitted
+            self._ensure_fit(texts)
             
-            logger.info(f"Created {len(embeddings)} embeddings")
-            return embeddings
+            # Try to get from cache first
+            embeddings_list = []
+            uncached_indices = []
+            uncached_texts = []
             
+            for i, text in enumerate(texts):
+                text_hash = hash(text[:100])  # Use first 100 chars as key
+                if text_hash in self._embedding_cache:
+                    embeddings_list.append(self._embedding_cache[text_hash])
+                else:
+                    embeddings_list.append(None)
+                    uncached_indices.append(i)
+                    uncached_texts.append(text)
+            
+            # Compute embeddings for uncached texts
+            if uncached_texts:
+                tfidf_vectors = self.vectorizer.transform(uncached_texts).toarray()
+                if self.pca is not None:
+                    computed_embeddings = self.pca.transform(tfidf_vectors)
+                else:
+                    computed_embeddings = tfidf_vectors
+                    if computed_embeddings.shape[1] < self.embedding_dim:
+                        padding = np.zeros((computed_embeddings.shape[0], self.embedding_dim - computed_embeddings.shape[1]))
+                        computed_embeddings = np.hstack([computed_embeddings, padding])
+                    elif computed_embeddings.shape[1] > self.embedding_dim:
+                        computed_embeddings = computed_embeddings[:, :self.embedding_dim]
+                
+                # Cache and place results
+                for idx, text, embedding in zip(uncached_indices, uncached_texts, computed_embeddings):
+                    text_hash = hash(text[:100])
+                    self._embedding_cache[text_hash] = embedding
+                    embeddings_list[idx] = embedding
+            
+            self._clear_cache_if_needed()
+            return np.array(embeddings_list)
         except Exception as e:
             logger.error(f"Error creating embeddings: {e}")
-            logger.info("Falling back to hash-based embeddings")
-            return self._create_fallback_embeddings(texts)
+            # Return random embeddings as fallback
+            return np.random.rand(len(texts), self.embedding_dim)
     
     def create_single_embedding(self, text: str) -> np.ndarray:
-        """Create embedding for a single text"""
+        """
+        Create embedding for a single text using TF-IDF
+        
+        Args:
+            text: Single text string
+        
+        Returns:
+            numpy array of shape (embedding_dim,)
+        """
         try:
-            if HAS_SENTENCE_TRANSFORMERS and self.model is not None:
-                embedding = self.model.encode(
-                    text,
-                    convert_to_numpy=True
-                )
+            # Ensure vectorizer is fitted (if this is first call, fit on text)
+            if not self.fitted:
+                self._ensure_fit([text])
+            
+            # Create TF-IDF vector
+            tfidf_vector = self.vectorizer.transform([text]).toarray()[0]
+            
+            # Reduce dimensions with PCA
+            if self.pca is not None:
+                embedding = self.pca.transform([tfidf_vector])[0]
             else:
-                embedding = self._create_fallback_embeddings([text])[0]
+                embedding = tfidf_vector
+                if len(embedding) < self.embedding_dim:
+                    padding = np.zeros(self.embedding_dim - len(embedding))
+                    embedding = np.concatenate([embedding, padding])
+                elif len(embedding) > self.embedding_dim:
+                    embedding = embedding[:self.embedding_dim]
+            
             return embedding
         except Exception as e:
             logger.error(f"Error creating single embedding: {e}")
-            return self._create_fallback_embeddings([text])[0]
-    
-    def get_embedding_dimension(self) -> int:
-        """Get the embedding dimension"""
-        return self.embedding_dim
+            # Return random embedding as fallback
+            return np.random.rand(self.embedding_dim)
 
 
-# Create singleton instance
+# Global instance
 embedding_service = FastEmbeddingService()
 

@@ -1,132 +1,61 @@
 #!/usr/bin/env python
-"""
-Database initialization script to set up the database and create default users.
-This script should be run once to initialize the database.
-"""
+"""Initialize database with default users"""
 
 import os
 import sys
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.getcwd())
 
 from app.database import engine, Base, SessionLocal
 from app.models.user import User, UserRole
 from app.auth.utils import get_password_hash
-from app.config import settings
 
-def init_db():
-    """Initialize database with tables and default users"""
-    
-    print("🔄 Creating database tables...")
-    Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created successfully!")
-    
-    # Create a session
-    db = SessionLocal()
-    
-    try:
-        # Create default superadmin
-        superadmin_username = "superadmin"
-        superadmin_email = "superadmin@artikle.local"
-        superadmin_password = "superadmin123"
-        
-        # Check if superadmin already exists
-        existing_superadmin = db.query(User).filter(
-            User.username == superadmin_username
-        ).first()
-        
-        if existing_superadmin:
-            print(f"⚠️  Superadmin user already exists: {superadmin_username}")
-        else:
-            superadmin = User(
-                email=superadmin_email,
-                username=superadmin_username,
-                hashed_password=get_password_hash(superadmin_password),
-                full_name="Super Administrator",
-                role=UserRole.SUPERADMIN,
-                is_active=True
-            )
-            db.add(superadmin)
-            db.commit()
-            db.refresh(superadmin)
-            print(f"✅ Superadmin user created!")
-            print(f"   Username: {superadmin_username}")
-            print(f"   Email: {superadmin_email}")
-            print(f"   Password: {superadmin_password}")
-        
-        # Create default admin
-        admin_username = "admin"
-        admin_email = "admin@artikle.local"
-        admin_password = "admin123"
-        
-        existing_admin = db.query(User).filter(
-            User.username == admin_username
-        ).first()
-        
-        if existing_admin:
-            print(f"⚠️  Admin user already exists: {admin_username}")
-        else:
-            admin = User(
-                email=admin_email,
-                username=admin_username,
-                hashed_password=get_password_hash(admin_password),
-                full_name="Administrator",
-                role=UserRole.ADMIN,
-                is_active=True
-            )
-            db.add(admin)
-            db.commit()
-            db.refresh(admin)
-            print(f"✅ Admin user created!")
-            print(f"   Username: {admin_username}")
-            print(f"   Email: {admin_email}")
-            print(f"   Password: {admin_password}")
-        
-        # Create default user
-        user_username = "user"
-        user_email = "user@artikle.local"
-        user_password = "user123"
-        
-        existing_user = db.query(User).filter(
-            User.username == user_username
-        ).first()
-        
-        if existing_user:
-            print(f"⚠️  User already exists: {user_username}")
-        else:
-            user = User(
-                email=user_email,
-                username=user_username,
-                hashed_password=get_password_hash(user_password),
-                full_name="Regular User",
-                role=UserRole.USER,
-                is_active=True
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-            print(f"✅ User created!")
-            print(f"   Username: {user_username}")
-            print(f"   Email: {user_email}")
-            print(f"   Password: {user_password}")
-        
-        print("\n📋 Summary:")
-        print("============================================")
-        print("🔐 SUPERADMIN CREDENTIALS:")
-        print(f"   Username: superadmin")
-        print(f"   Password: superadmin123")
-        print("\n🔐 ADMIN CREDENTIALS:")
-        print(f"   Username: admin")
-        print(f"   Password: admin123")
-        print("\n🔐 USER CREDENTIALS:")
-        print(f"   Username: user")
-        print(f"   Password: user123")
-        print("============================================")
-        print("\n✨ Database initialization complete!")
-        
-    finally:
-        db.close()
+# Create tables
+Base.metadata.create_all(bind=engine)
 
-if __name__ == "__main__":
-    init_db()
+db = SessionLocal()
+
+# Check if users already exist
+existing_users = db.query(User).count()
+if existing_users > 0:
+    print(f"Database already has {existing_users} users")
+    db.close()
+    sys.exit(0)
+
+# Create default users
+users = [
+    User(
+        username="superadmin",
+        email="superadmin@example.com",
+        hashed_password=get_password_hash("superadmin"),
+        full_name="Super Admin",
+        role=UserRole.SUPERADMIN,
+        is_active=True
+    ),
+    User(
+        username="admin",
+        email="admin@example.com",
+        hashed_password=get_password_hash("admin"),
+        full_name="Admin User",
+        role=UserRole.ADMIN,
+        is_active=True
+    ),
+    User(
+        username="user",
+        email="user@example.com",
+        hashed_password=get_password_hash("user"),
+        full_name="Regular User",
+        role=UserRole.USER,
+        is_active=True
+    )
+]
+
+for user in users:
+    db.add(user)
+
+db.commit()
+print(f"Created {len(users)} default users:")
+print("  - superadmin / superadmin (SUPERADMIN)")
+print("  - admin / admin (ADMIN)")
+print("  - user / user (USER)")
+db.close()

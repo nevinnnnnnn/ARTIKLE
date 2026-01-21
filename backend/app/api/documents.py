@@ -84,7 +84,8 @@ async def auto_process_document(document_id: int, user_id: int):
                 "document_id": document_id,
                 "chunk_index": chunk.chunk_index,
                 "page_number": chunk.page_number,
-                "token_count": chunk.token_count
+                "token_count": chunk.token_count,
+                "content": chunk.content  # Store full content for retrieval
             })
 
         vector_store = vector_store_manager.get_store(document_id)
